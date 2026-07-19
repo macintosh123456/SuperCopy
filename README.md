@@ -5,7 +5,7 @@ SuperCopy 是一個專為 Windows 環境打造的極限效能命令列 (CLI) 工
 本程式完全捨棄了傳統的作業系統 API 與快取機制，利用底層硬體特性（巨型分頁、實體核心隔離、Direct I/O）將 NVMe SSD 與 PCIe 通道的物理頻寬榨乾到極致。<br><br>
 
 核心亮點<br>
-一、實體核心隔離 (Hardware-Aware CPU Pinning):程式會動態偵測 CPU 架構。預設情況下，程式會徹底屏除超線程 (Hyper-Threading) 所帶來的資源競爭，將四重工作者嚴格綁定於獨立的「實體核心」上運行，保障 L1/L2 快取的絕對獨佔。<br>
+一、實體核心隔離 (Hardware-Aware CPU Pinning):程式會動態偵測 CPU 架構。預設情況下，程式會徹底屏除超線程 (Hyper-Threading) 所帶來的資源競爭，將執行緒嚴格綁定於獨立的「實體核心」上運行，保障 L1/L2 快取的絕對獨佔。<br>
 二、大小寫脫敏 CLI (Case-Insensitive):所有的命令列參數皆可隨意混用大小寫 (如 --rfd 或 --RFD 皆可)。<br>
 三、中英文雙語介面:透過 --lang TW 或 --lang US 即可無縫切換終端機輸出的語言介面。<br>
 
@@ -41,7 +41,7 @@ SuperCopy is an extreme-performance Command Line Interface (CLI) tool designed f
 By completely bypassing traditional OS APIs and caching mechanisms, it leverages low-level hardware characteristics (Huge Pages, Physical Core Pinning, Direct I/O) to push the physical bandwidth of NVMe SSDs to their absolute limits.<br><br>
 
 Core Highlights<br>
-1.Physical Core Isolation (CPU Pinning):The program dynamically detects your CPU architecture. By default, it excludes Hyper-Threading (SMT) to avoid resource contention, strictly pinning workers to independent "Physical Cores" to guarantee absolute exclusivity of L1/L2 caches.<br>
+1.Physical Core Isolation (CPU Pinning):The program dynamically detects your CPU architecture. By default, it excludes Hyper-Threading (SMT) to avoid resource contention, strictly pinning threads to independent "Physical Cores" to guarantee absolute exclusivity of L1/L2 caches.<br>
 2.Case-Insensitive CLI:All command-line arguments can be written in any case (e.g., --rfd or --RFD).<br>
 3.Bilingual Interface:Seamlessly switch the console output language using --lang TW or --lang US.<br>
 
