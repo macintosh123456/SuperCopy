@@ -24,10 +24,15 @@ jobs:
     - name: Compile SuperCopy
       run: |
         cl /EHsc /O2 /std:c++17 SuperCopy.cpp
+        cl /EHsc /O2 /std:c++17 SuperCopyClient.cpp
 
     # 4. 將編譯好的 exe 檔打包讓你下載
     - name: Upload EXE Artifact
       uses: actions/upload-artifact@v4
       with:
+      name: SuperCopy-Windows-EXE
+        path: |
+          SuperCopy.exe
+          SuperCopyClient.exe
         name: SuperCopy-Windows-EXE
         path: supercopy.exe
