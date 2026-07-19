@@ -44,12 +44,12 @@ void RelaunchAsAdmin(wchar_t* exePath) {
 // 2. 組態設定檔 (INI) 管理
 // ==========================================
 std::wstring config_file = L".\\SuperCopyClient.ini";
-std::wstring current_lang = L"TW";
+std::wstring current_lang = L"US";
 std::wstring cli_path = L".\\supercopy.exe";
 
 void LoadConfig() {
     wchar_t buffer[MAX_PATH];
-    GetPrivateProfileStringW(L"Settings", L"Language", L"TW", buffer, MAX_PATH, config_file.c_str());
+    GetPrivateProfileStringW(L"Settings", L"Language", L"US", buffer, MAX_PATH, config_file.c_str());
     current_lang = buffer;
     
     GetPrivateProfileStringW(L"Settings", L"CLIPath", L".\\supercopy.exe", buffer, MAX_PATH, config_file.c_str());
