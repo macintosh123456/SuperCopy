@@ -18,17 +18,58 @@
 #pragma comment(lib, "Advapi32.lib")
 
 // ==========================================
-// 1. 全域中斷訊號與組態
+// 1. 全域中斷、多國語言與 CPU 核心偵測
 // ==========================================
 std::atomic<bool> g_stop_requested{false};
+
+enum class Lang { TW, US };
+Lang g_lang = Lang::TW; 
+
+std::wstring Msg(const wchar_t* tw, const wchar_t* us) {
+    return (g_lang == Lang::US) ? us : tw;
+}
 
 BOOL WINAPI ConsoleCtrlHandler(DWORD dwCtrlType) {
     if (dwCtrlType == CTRL_C_EVENT || dwCtrlType == CTRL_BREAK_EVENT) {
         g_stop_requested = true;
-        std::wcout << L"\n\n[警告] 收到中斷訊號 (Ctrl+C)，正在等待當前 I/O 任務完成並安全退出...\n";
-        return TRUE; // 攔截訊號，不讓 Windows 強制關閉程式
+        std::wcout << L"\n\n" << Msg(
+            L"[警告] 收到中斷訊號 (Ctrl+C)，正在等待當前任務完成並安全退出...\n",
+            L"[WARN] Interrupt signal (Ctrl+C) received. Waiting for tasks to finish...\n"
+        );
+        return TRUE; 
     }
     return FALSE;
+}
+
+// 動態獲取 CPU 核心遮罩 (區分實體核心與超線程)
+std::vector<ULONG_PTR> GetCpuMasks(bool enable_eht) {
+    DWORD len = 0;
+    GetLogicalProcessorInformation(nullptr, &len);
+    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) return {1}; 
+    
+    std::vector<SYSTEM_LOGICAL_PROCESSOR_INFORMATION> buffer(len / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION));
+    if (!GetLogicalProcessorInformation(buffer.data(), &len)) return {1};
+    
+    std::vector<ULONG_PTR> masks;
+    for (const auto& info : buffer) {
+        if (info.Relationship == RelationProcessorCore) {
+            if (!enable_eht) {
+                // EHT 關閉：只取該實體核心的第一個邏輯線程 (剔除超線程)
+                ULONG_PTR m = info.ProcessorMask;
+                masks.push_back(m & (0 - m)); // 取得最低位的 bit
+            } else {
+                // EHT 開啟：將該實體核心下的所有超線程全數加入
+                ULONG_PTR m = info.ProcessorMask;
+                ULONG_PTR bit = 1;
+                for (int i = 0; i < sizeof(ULONG_PTR) * 8; ++i) {
+                    if (m & bit) masks.push_back(bit);
+                    bit <<= 1;
+                }
+            }
+        }
+    }
+    if (masks.empty()) masks.push_back(1); // 防呆機制
+    return masks;
 }
 
 enum class SyncMode { EXTREME_SPIN, SMART_WAIT };
@@ -36,16 +77,18 @@ enum class SyncMode { EXTREME_SPIN, SMART_WAIT };
 struct SuperCopyConfig {
     size_t total_ram_bytes;       
     size_t chunk_size_bytes;      
-    int read_workers;             
-    int write_workers;            
+    int num_rfd;             
+    int num_wtd;            
     SyncMode sync_mode;           
     bool opt_direct_io;           
     bool opt_pin_cpu;             
-    bool opt_zero_copy;           
+    bool opt_zero_copy;
+    bool opt_eht; // Enable Hyper-Threading
+    std::vector<ULONG_PTR> cpu_masks; // 可用的 CPU 核心遮罩
 };
 
 // ==========================================
-// 2. 同步器與任務佇列 (與先前相同)
+// 2. 同步器與任務佇列
 // ==========================================
 class PingPongSync {
 private:
@@ -63,7 +106,7 @@ public:
         } else {
             LONG undesired = 0;
             while (InterlockedCompareExchange(&state, 0, 0) == 0 && !g_stop_requested) {
-                WaitOnAddress((volatile PVOID)&state, &undesired, sizeof(LONG), 100); // 每 100ms 醒來檢查是否收到 Ctrl+C
+                WaitOnAddress((volatile PVOID)&state, &undesired, sizeof(LONG), 100); 
             }
         }
     }
@@ -103,7 +146,7 @@ public:
 };
 
 // ==========================================
-// 3. 核心引擎 (加入進度監控)
+// 3. 核心引擎
 // ==========================================
 class SuperCopyEngine {
 private:
@@ -114,15 +157,13 @@ private:
     uint8_t* buffer_N1 = nullptr;
     uint8_t* buffer_N2 = nullptr;
     
-    PingPongSync sync_N1, sync_N2;
-    PingPongSync sync_disk_N1, sync_disk_N2; 
-
+    PingPongSync sync_N1, sync_N2, sync_disk_N1, sync_disk_N2; 
     TaskQueue read_queue, write_queue;
-    std::vector<std::thread> read_workers, write_workers;
+    std::vector<std::thread> thread_readfromdisk, thread_writetodisk;
 
     std::atomic<bool> global_eof{false};
     uint64_t total_file_size = 0;
-    std::atomic<uint64_t> total_bytes_written{0}; // 用於進度條統計
+    std::atomic<uint64_t> total_bytes_written{0}; 
 
     bool EnableHugePagesPrivilege() {
         HANDLE hToken;
@@ -136,7 +177,6 @@ private:
         return true;
     }
 
-    // --- 獨立的進度條監控執行緒 ---
     void ProgressMonitor() {
         auto start_time = std::chrono::steady_clock::now();
         uint64_t last_written = 0;
@@ -146,20 +186,19 @@ private:
             if (total_file_size == 0) continue;
 
             uint64_t current_written = total_bytes_written.load();
-            auto current_time = std::chrono::steady_clock::now();
-            std::chrono::duration<double> elapsed = current_time - start_time;
-
-            // 計算速度 (MB/s)
             double speed_mb_s = ((current_written - last_written) / 1024.0 / 1024.0) / 0.5;
             last_written = current_written;
-
-            // 計算進度百分比
             double progress = (static_cast<double>(current_written) / total_file_size) * 100.0;
 
-            // 覆寫同一行輸出 (\r)
-            std::wcout << L"\r[複製中] 進度: " << std::fixed << std::setprecision(1) << progress << L"% | "
-                       << L"已完成: " << (current_written / 1024 / 1024) << L" MB / " << (total_file_size / 1024 / 1024) << L" MB | "
-                       << L"速度: " << std::setprecision(2) << speed_mb_s << L" MB/s     " << std::flush;
+            if (g_lang == Lang::TW) {
+                std::wcout << L"\r[進度] " << std::fixed << std::setprecision(1) << progress << L"% | "
+                           << L"完成: " << (current_written / 1024 / 1024) << L" MB / " << (total_file_size / 1024 / 1024) << L" MB | "
+                           << L"速度: " << std::setprecision(2) << speed_mb_s << L" MB/s     " << std::flush;
+            } else {
+                std::wcout << L"\r[Copy] " << std::fixed << std::setprecision(1) << progress << L"% | "
+                           << L"Done: " << (current_written / 1024 / 1024) << L" MB / " << (total_file_size / 1024 / 1024) << L" MB | "
+                           << L"Speed: " << std::setprecision(2) << speed_mb_s << L" MB/s     " << std::flush;
+            }
         }
     }
 
@@ -170,8 +209,14 @@ public:
           sync_disk_N1(config.sync_mode), sync_disk_N2(config.sync_mode) {
         
         const size_t TWO_GB = 2ULL * 1024 * 1024 * 1024;
-        if (cfg.total_ram_bytes % TWO_GB != 0) throw std::invalid_argument("RAM 必須是 2GB 的倍數");
-        if ((cfg.chunk_size_bytes & (cfg.chunk_size_bytes - 1)) != 0) throw std::invalid_argument("Chunk 必須是 2 的次方");
+        const size_t ONE_GB = 1ULL * 1024 * 1024 * 1024;
+
+        if (cfg.total_ram_bytes % TWO_GB != 0) 
+            throw std::invalid_argument(g_lang == Lang::TW ? "RAM 必須是 2GB 的倍數" : "RAM must be a multiple of 2GB");
+        if ((cfg.chunk_size_bytes & (cfg.chunk_size_bytes - 1)) != 0) 
+            throw std::invalid_argument(g_lang == Lang::TW ? "Chunk 必須是 2 的次方" : "Chunk size must be a power of 2");
+        if (cfg.chunk_size_bytes > ONE_GB) 
+            throw std::invalid_argument(g_lang == Lang::TW ? "Chunk 最大限制為 1GB" : "Max chunk size is 1GB");
     }
 
     ~SuperCopyEngine() {
@@ -180,14 +225,18 @@ public:
 
     void Execute() {
         if (cfg.opt_zero_copy) {
-            std::wcout << L"[模式] 啟動 Zero-Copy 模式...\n";
+            std::wcout << Msg(L"[模式] 啟動 Zero-Copy 模式...\n", L"[Mode] Starting Zero-Copy Mode...\n");
             CopyFileExW(src_path.c_str(), dst_path.c_str(), nullptr, nullptr, FALSE, COPY_FILE_NO_BUFFERING);
             return;
         }
 
         EnableHugePagesPrivilege();
         memory_pool = VirtualAlloc(NULL, cfg.total_ram_bytes, MEM_COMMIT | MEM_RESERVE | MEM_LARGE_PAGES, PAGE_READWRITE);
-        if (!memory_pool) throw std::runtime_error("巨型分頁配置失敗，請確認是否以「系統管理員」身分執行程式！");
+        if (!memory_pool) {
+            throw std::runtime_error(g_lang == Lang::TW ? 
+                "巨型分頁配置失敗，請確認以「系統管理員」身分執行！" : 
+                "Huge Pages allocation failed. Run as Administrator!");
+        }
 
         size_t half_N = cfg.total_ram_bytes / 2;
         buffer_N1 = static_cast<uint8_t*>(memory_pool);
@@ -196,41 +245,41 @@ public:
         sync_disk_N1.NotifyReady();
         sync_disk_N2.NotifyReady();
 
-        for (int i = 0; i < cfg.read_workers; ++i) read_workers.emplace_back(&SuperCopyEngine::readfromdisk, this, i);
-        for (int i = 0; i < cfg.write_workers; ++i) write_workers.emplace_back(&SuperCopyEngine::writetodisk, this, i);
+        for (int i = 0; i < cfg.num_rfd; ++i) thread_readfromdisk.emplace_back(&SuperCopyEngine::readfromdisk, this, i);
+        for (int i = 0; i < cfg.num_wtd; ++i) thread_writetodisk.emplace_back(&SuperCopyEngine::writetodisk, this, i);
 
         std::thread manager_read(&SuperCopyEngine::disktoram, this);
         std::thread manager_write(&SuperCopyEngine::ramtodisk, this);
-        std::thread monitor(&SuperCopyEngine::ProgressMonitor, this); // 啟動進度條監控
+        std::thread monitor(&SuperCopyEngine::ProgressMonitor, this); 
 
         manager_read.join();
         manager_write.join();
         monitor.join();
 
-        // 清理工作者執行緒
-        for (int i = 0; i < cfg.read_workers; ++i) read_queue.Push({NULL, 0, nullptr, 0, nullptr, true});
-        for (int i = 0; i < cfg.write_workers; ++i) write_queue.Push({NULL, 0, nullptr, 0, nullptr, true});
+        for (int i = 0; i < cfg.num_rfd; ++i) read_queue.Push({NULL, 0, nullptr, 0, nullptr, true});
+        for (int i = 0; i < cfg.num_wtd; ++i) write_queue.Push({NULL, 0, nullptr, 0, nullptr, true});
 
-        for (auto& t : read_workers) t.join();
-        for (auto& t : write_workers) t.join();
+        for (auto& t : thread_readfromdisk) t.join();
+        for (auto& t : thread_writetodisk) t.join();
 
         if (g_stop_requested) {
-            std::wcout << L"\n[中斷] 複製任務已被使用者中止。\n";
+            std::wcout << Msg(L"\n[中斷] 任務已中止。\n", L"\n[Aborted] Task aborted.\n");
         } else {
-            std::wcout << L"\n[成功] 超級複製完成！\n";
+            std::wcout << Msg(L"\n[成功] 複製完成！\n", L"\n[Success] Completed!\n");
         }
     }
 
 private:
     void disktoram() {
-        if (cfg.opt_pin_cpu) SetThreadAffinityMask(GetCurrentThread(), 1); 
+        if (cfg.opt_pin_cpu && !cfg.cpu_masks.empty()) 
+            SetThreadAffinityMask(GetCurrentThread(), cfg.cpu_masks[0 % cfg.cpu_masks.size()]);
 
         DWORD flags = FILE_ATTRIBUTE_NORMAL;
         if (cfg.opt_direct_io) flags |= FILE_FLAG_NO_BUFFERING; 
 
         HANDLE hSrc = CreateFileW(src_path.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, flags, NULL);
         if (hSrc == INVALID_HANDLE_VALUE) {
-            std::wcerr << L"\n[錯誤] 無法開啟來源檔案。\n";
+            std::wcerr << Msg(L"\n[錯誤] 無法開啟來源。\n", L"\n[Error] Unable to open source.\n");
             global_eof = true;
             return;
         }
@@ -270,11 +319,12 @@ private:
             fill_N1 = !fill_N1;
         }
         CloseHandle(hSrc);
-        global_eof = true; // 讀取完畢或被中斷
+        global_eof = true; 
     }
 
     void ramtodisk() {
-        if (cfg.opt_pin_cpu) SetThreadAffinityMask(GetCurrentThread(), 2); 
+        if (cfg.opt_pin_cpu && !cfg.cpu_masks.empty()) 
+            SetThreadAffinityMask(GetCurrentThread(), cfg.cpu_masks[1 % cfg.cpu_masks.size()]);
 
         DWORD flags = FILE_ATTRIBUTE_NORMAL;
         if (cfg.opt_direct_io) flags |= FILE_FLAG_NO_BUFFERING;
@@ -316,7 +366,7 @@ private:
 
             while (pending_write_tasks.load() > 0) YieldProcessor();
 
-            total_bytes_written.fetch_add(bytes_to_drain, std::memory_order_relaxed); // 更新總進度
+            total_bytes_written.fetch_add(bytes_to_drain, std::memory_order_relaxed); 
             source_disk_sync.NotifyReady();
             current_offset += bytes_to_drain;
             drain_N1 = !drain_N1;
@@ -325,7 +375,9 @@ private:
     }
 
     void readfromdisk(int worker_id) {
-        if (cfg.opt_pin_cpu) SetThreadAffinityMask(GetCurrentThread(), (1ULL << (worker_id + 2))); 
+        if (cfg.opt_pin_cpu && !cfg.cpu_masks.empty()) 
+            SetThreadAffinityMask(GetCurrentThread(), cfg.cpu_masks[(2 + worker_id) % cfg.cpu_masks.size()]);
+            
         while (true) {
             IOTask task = read_queue.Pop();
             if (task.is_poison_pill || g_stop_requested) break; 
@@ -339,7 +391,9 @@ private:
     }
 
     void writetodisk(int worker_id) {
-        if (cfg.opt_pin_cpu) SetThreadAffinityMask(GetCurrentThread(), (1ULL << (worker_id + cfg.read_workers + 2))); 
+        if (cfg.opt_pin_cpu && !cfg.cpu_masks.empty()) 
+            SetThreadAffinityMask(GetCurrentThread(), cfg.cpu_masks[(2 + cfg.num_rfd + worker_id) % cfg.cpu_masks.size()]);
+            
         while (true) {
             IOTask task = write_queue.Pop();
             if (task.is_poison_pill || g_stop_requested) break; 
@@ -357,85 +411,147 @@ private:
 // 4. CLI 參數解析與程式進入點
 // ==========================================
 void PrintHelp() {
-    std::wcout << L"SuperCopy 極速複製引擎 (CLI 完整版)\n"
-               << L"用法: supercopy.exe <來源檔案> <目的檔案> [選項]\n\n"
-               << L"參數選項:\n"
-               << L"  --ram <GB>           設定緩衝區大小(必須是2的倍數)，預設: 40\n"
-               << L"  --chunk <MB>         設定切片大小(必須是2的次方)，預設: 8\n"
-               << L"  --read-workers <N>   設定讀取工人數量，預設: 8\n"
-               << L"  --write-workers <N>  設定寫入工人數量，預設: 8\n"
-               << L"  --smart-wait         啟用智慧等待模式 (預設為極限自旋)\n"
-               << L"  --no-direct-io       關閉繞過系統快取 (預設為開啟)\n"
-               << L"  --no-pin-cpu         關閉綁定 CPU 核心 (預設為開啟)\n"
-               << L"  --zero-copy          使用 Windows 底層拷貝 (無視 RAM 與工人設定)\n";
+    if (g_lang == Lang::TW) {
+        std::wcout << L"SuperCopy 極速複製引擎\n"
+                   << L"用法: supercopy.exe <來源> <目的> [選項 (大小寫不拘)]\n\n"
+                   << L"參數選項:\n"
+                   << L"  --lang <TW|US>  切換語言，預設: TW\n"
+                   << L"  --ram <GB>      緩衝區大小(2的倍數)，預設: 8\n"
+                   << L"  --chunk <MB>    切片大小(最大1024)，預設: 16\n"
+                   << L"  --RFD <N>       readfromdisk 數量，預設: CPU核心數/2\n"
+                   << L"  --WTD <N>       writetodisk 數量，預設: CPU核心數/2\n"
+                   << L"  --SW            啟用 Smart Wait (預設為極限自旋)\n"
+                   << L"  --NDIO          關閉 Direct I/O (不繞過快取)\n"
+                   << L"  --NPCPU         關閉 CPU 綁核\n"
+                   << L"  --ZC            啟用 Zero-Copy (系統底層拷貝)\n"
+                   << L"  --EHT           啟用超線程分配 (預設僅使用實體核心)\n";
+    } else {
+        std::wcout << L"SuperCopy Ultimate Engine\n"
+                   << L"Usage: supercopy.exe <Src> <Dst> [Options (Case-Insensitive)]\n\n"
+                   << L"Options:\n"
+                   << L"  --lang <TW|US>  Switch language, Default: TW\n"
+                   << L"  --ram <GB>      Buffer size (Multiple of 2), Default: 8\n"
+                   << L"  --chunk <MB>    Chunk size (Max 1024), Default: 16\n"
+                   << L"  --RFD <N>       readfromdisk threads, Default: Cores/2\n"
+                   << L"  --WTD <N>       writetodisk threads, Default: Cores/2\n"
+                   << L"  --SW            Enable Smart Wait\n"
+                   << L"  --NDIO          Disable Direct I/O (Use OS Cache)\n"
+                   << L"  --NPCPU         Disable CPU Pinning\n"
+                   << L"  --ZC            Enable Zero-Copy (OS Native)\n"
+                   << L"  --EHT           Enable Hyper-Threading usage\n";
+    }
 }
 
 int wmain(int argc, wchar_t* argv[]) {
     setlocale(LC_ALL, "");
-
-    // 註冊 Ctrl+C 攔截器
     SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE);
+
+    // 第一階段：掃描語言設定 (確保錯誤訊息顯示正確)
+    for (int i = 1; i < argc; ++i) {
+        std::wstring arg = argv[i];
+        std::transform(arg.begin(), arg.end(), arg.begin(), ::towlower);
+        if (arg == L"--lang" && i + 1 < argc) {
+            std::wstring lang_val = argv[i+1];
+            std::transform(lang_val.begin(), lang_val.end(), lang_val.begin(), ::towlower);
+            if (lang_val == L"us") g_lang = Lang::US;
+        }
+    }
 
     if (argc < 3) {
         PrintHelp();
-        return 1; // 錯誤返回碼
+        return 1; 
     }
 
     std::wstring src = argv[1];
     std::wstring dst = argv[2];
 
     SuperCopyConfig config;
-    config.total_ram_bytes = 40ULL * 1024 * 1024 * 1024; 
-    config.chunk_size_bytes = 8 * 1024 * 1024;           
-    config.read_workers = 8;
-    config.write_workers = 8;
+    config.total_ram_bytes = 8ULL * 1024 * 1024 * 1024;  // 預設 8GB
+    config.chunk_size_bytes = 16 * 1024 * 1024;          // 預設 16MB
+    config.num_rfd = 0; // 0 代表尚未設定，等待自動配置
+    config.num_wtd = 0; 
     config.sync_mode = SyncMode::EXTREME_SPIN;
     config.opt_direct_io = true;
     config.opt_pin_cpu = true;
     config.opt_zero_copy = false;
+    config.opt_eht = false;
 
+    // 第二階段：掃描 EHT 參數 (必須先知道是否啟用超線程，才能計算可用核心)
     for (int i = 3; i < argc; ++i) {
         std::wstring arg = argv[i];
-        if (arg == L"--ram" && i + 1 < argc) {
+        std::transform(arg.begin(), arg.end(), arg.begin(), ::towlower);
+        if (arg == L"--eht") config.opt_eht = true;
+    }
+
+    // 計算可用 CPU 核心
+    config.cpu_masks = GetCpuMasks(config.opt_eht);
+    size_t available_cores = config.cpu_masks.size();
+
+    // 第三階段：解析剩餘參數 (大小寫脫敏)
+    for (int i = 3; i < argc; ++i) {
+        std::wstring arg = argv[i];
+        std::transform(arg.begin(), arg.end(), arg.begin(), ::towlower);
+        
+        if (arg == L"--lang" || arg == L"--eht") {
+            if (arg == L"--lang") i++; 
+            continue;
+        } else if (arg == L"--ram" && i + 1 < argc) {
             config.total_ram_bytes = static_cast<size_t>(_wtoi(argv[++i])) * 1024 * 1024 * 1024;
         } else if (arg == L"--chunk" && i + 1 < argc) {
             config.chunk_size_bytes = static_cast<size_t>(_wtoi(argv[++i])) * 1024 * 1024;
-        } else if (arg == L"--read-workers" && i + 1 < argc) {
-            config.read_workers = _wtoi(argv[++i]);
-        } else if (arg == L"--write-workers" && i + 1 < argc) {
-            config.write_workers = _wtoi(argv[++i]);
-        } else if (arg == L"--smart-wait") {
+        } else if (arg == L"--rfd" && i + 1 < argc) {
+            config.num_rfd = _wtoi(argv[++i]);
+        } else if (arg == L"--wtd" && i + 1 < argc) {
+            config.num_wtd = _wtoi(argv[++i]);
+        } else if (arg == L"--sw") {
             config.sync_mode = SyncMode::SMART_WAIT;
-        } else if (arg == L"--no-direct-io") {
+        } else if (arg == L"--ndio") {
             config.opt_direct_io = false;
-        } else if (arg == L"--no-pin-cpu") {
+        } else if (arg == L"--npcpu") {
             config.opt_pin_cpu = false;
-        } else if (arg == L"--zero-copy") {
+        } else if (arg == L"--zc") {
             config.opt_zero_copy = true;
         } else {
-            std::wcerr << L"未知的參數: " << arg << L"\n";
+            std::wcerr << Msg(L"未知參數: ", L"Unknown option: ") << argv[i] << L"\n";
             PrintHelp();
             return 1;
         }
     }
 
+    // 自動配置工人數量 (若使用者未輸入)
+    if (config.num_rfd == 0) config.num_rfd = std::max<int>(1, available_cores / 2);
+    if (config.num_wtd == 0) config.num_wtd = std::max<int>(1, available_cores / 2);
+
+    // CPU 配置上限驗證 (RFD + WTD 不得超過可用核心數)
+    if (config.num_rfd + config.num_wtd > available_cores) {
+        std::wcerr << Msg(
+            L"[錯誤] 設定的 RFD 與 WTD 總數超過可用核心上限。\n(當前可用核心: ", 
+            L"[Error] RFD and WTD total exceeds available cores.\n(Available: "
+        ) << available_cores << Msg(
+            L" | 提示：若需突破實體核心限制，請加上 --EHT 參數)\n", 
+            L" | Hint: Add --EHT to use Hyper-Threading logical cores)\n"
+        );
+        return 1;
+    }
+
     try {
         std::wcout << L"=========================================\n"
-                   << L"  SuperCopy 極速複製啟動\n"
+                   << Msg(L"  SuperCopy 極速複製啟動\n", L"  SuperCopy Engine Started\n")
                    << L"=========================================\n"
-                   << L"來源: " << src << L"\n"
-                   << L"目的: " << dst << L"\n"
-                   << L"RAM : " << (config.total_ram_bytes / 1024 / 1024 / 1024) << L" GB\n"
+                   << Msg(L"來源: ", L"Src : ") << src << L"\n"
+                   << Msg(L"目的: ", L"Dst : ") << dst << L"\n"
+                   << Msg(L"記憶體: ", L"RAM : ") << (config.total_ram_bytes / 1024 / 1024 / 1024) << L" GB\n"
+                   << Msg(L"總核心: ", L"Core: ") << available_cores << Msg(L" (RFD:", L" (RFD:") << config.num_rfd << Msg(L", WTD:", L", WTD:") << config.num_wtd << L")\n"
                    << L"=========================================\n\n";
 
         SuperCopyEngine engine(src, dst, config);
         engine.Execute();
         
-        if (g_stop_requested) return 130; // 130 是標準的 SIGINT (Ctrl+C) 退出碼
+        if (g_stop_requested) return 130; 
 
     } catch (const std::exception& e) {
-        std::cerr << "\n[致命錯誤] " << e.what() << "\n";
+        std::cerr << "\n" << (g_lang == Lang::TW ? "[致命錯誤] " : "[Fatal Error] ") << e.what() << "\n";
         return 1; 
     }
-    return 0; // 成功返回碼
+    return 0; 
 }
