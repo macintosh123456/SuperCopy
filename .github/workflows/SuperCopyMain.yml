@@ -30,9 +30,9 @@ jobs:
     - name: Upload EXE Artifact
       uses: actions/upload-artifact@v4
       with:
-      name: SuperCopy-Windows-EXE
+        name: SuperCopy-Windows-EXE
         path: |
           SuperCopy.exe
           SuperCopyClient.exe
-        name: SuperCopy-Windows-EXE
+  S            path: ame: SuperCopy-Windows-EXE
         path: supercopy.exe
