@@ -12,6 +12,7 @@
 #include <algorithm>
 
 #pragma comment(lib, "Synchronization.lib")
+#pragma comment(lib, "Advapi32.lib")
 
 // ==========================================
 // 1. 組態與同步機制 (Sync & Config)
