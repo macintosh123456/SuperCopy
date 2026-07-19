@@ -384,7 +384,7 @@ void PrintHelp() {
         std::wcout << L"SuperCopy 極速複製引擎\n"
                    << L"用法: supercopy.exe <來源> <目的> [選項 (大小寫不拘)]\n\n"
                    << L"參數選項:\n"
-                   << L"  --helpH         顯示此說明畫面\n"
+                   << L"  --help          顯示此說明畫面\n"
                    << L"  --lang <TW|US>  切換語言，預設: TW\n"
                    << L"  --ram <GB>      緩衝區大小(2的倍數)，預設: 8\n"
                    << L"  --chunk <MB>    切片大小(最大為RAM的一半 N/2)，預設: 16\n"
@@ -399,7 +399,7 @@ void PrintHelp() {
         std::wcout << L"SuperCopy Ultimate Engine\n"
                    << L"Usage: supercopy.exe <Src> <Dst> [Options (Case-Insensitive)]\n\n"
                    << L"Options:\n"
-                   << L"  --helpH         Show this help message\n"
+                   << L"  --help          Show this help message\n"
                    << L"  --lang <TW|US>  Switch language, Default: TW\n"
                    << L"  --ram <GB>      Buffer size (Multiple of 2), Default: 8\n"
                    << L"  --chunk <MB>    Chunk size (Max N/2 of RAM), Default: 16\n"
@@ -425,7 +425,7 @@ int wmain(int argc, wchar_t* argv[]) {
             std::wstring lang_val = argv[i+1];
             std::transform(lang_val.begin(), lang_val.end(), lang_val.begin(), ::towlower);
             if (lang_val == L"us") g_lang = Lang::US;
-        } else if (arg == L"--helph") {
+        } else if (arg == L"--help") {
             PrintHelp();
             return 0;
         }
@@ -513,7 +513,7 @@ int wmain(int argc, wchar_t* argv[]) {
         std::wstring arg = argv[i];
         std::transform(arg.begin(), arg.end(), arg.begin(), ::towlower);
         
-        if (arg == L"--lang" || arg == L"--eht" || arg == L"--npcpu" || arg == L"--helph") {
+        if (arg == L"--lang" || arg == L"--eht" || arg == L"--npcpu" || arg == L"--help") {
             if (arg == L"--lang") i++; 
             continue;
         } else if (arg == L"--ram" && i + 1 < argc) {
