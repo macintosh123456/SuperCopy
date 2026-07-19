@@ -1,0 +1,32 @@
+name: Build SuperCopy (Windows)
+
+# 當有程式碼推送到 main 分支時自動觸發
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    # 租用 GitHub 免費的最新 Windows 虛擬機
+    runs-on: windows-latest
+
+    steps:
+    # 1. 取得你的程式碼
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    # 2. 載入微軟 C++ 編譯器環境 (MSVC)
+    - name: Setup MSVC
+      uses: ilammy/msvc-dev-cmd@v1
+
+    # 3. 執行編譯指令 (開啟最高 O2 最佳化)
+    - name: Compile SuperCopy
+      run: |
+        cl /EHsc /O2 /std:c++17 supercopy.cpp
+
+    # 4. 將編譯好的 exe 檔打包讓你下載
+    - name: Upload EXE Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: SuperCopy-Windows-EXE
+        path: supercopy.exe
