@@ -9,6 +9,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <stdexcept>
+#include <algorithm>
 
 #pragma comment(lib, "Synchronization.lib")
 
