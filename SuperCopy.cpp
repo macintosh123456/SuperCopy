@@ -18,7 +18,7 @@
 #pragma comment(lib, "Advapi32.lib")
 
 // ==========================================
-// 1. 全域中斷、多國語言與 CPU 核心偵測
+// 1. 全域中斷、多國語言
 // ==========================================
 std::atomic<bool> g_stop_requested{false};
 
@@ -41,37 +41,6 @@ BOOL WINAPI ConsoleCtrlHandler(DWORD dwCtrlType) {
     return FALSE;
 }
 
-// 動態獲取 CPU 核心遮罩 (區分實體核心與超線程)
-std::vector<ULONG_PTR> GetCpuMasks(bool enable_eht) {
-    DWORD len = 0;
-    GetLogicalProcessorInformation(nullptr, &len);
-    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) return {1}; 
-    
-    std::vector<SYSTEM_LOGICAL_PROCESSOR_INFORMATION> buffer(len / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION));
-    if (!GetLogicalProcessorInformation(buffer.data(), &len)) return {1};
-    
-    std::vector<ULONG_PTR> masks;
-    for (const auto& info : buffer) {
-        if (info.Relationship == RelationProcessorCore) {
-            if (!enable_eht) {
-                // EHT 關閉：只取該實體核心的第一個邏輯線程 (剔除超線程)
-                ULONG_PTR m = info.ProcessorMask;
-                masks.push_back(m & (0 - m)); // 取得最低位的 bit
-            } else {
-                // EHT 開啟：將該實體核心下的所有超線程全數加入
-                ULONG_PTR m = info.ProcessorMask;
-                ULONG_PTR bit = 1;
-                for (int i = 0; i < sizeof(ULONG_PTR) * 8; ++i) {
-                    if (m & bit) masks.push_back(bit);
-                    bit <<= 1;
-                }
-            }
-        }
-    }
-    if (masks.empty()) masks.push_back(1); // 防呆機制
-    return masks;
-}
-
 enum class SyncMode { EXTREME_SPIN, SMART_WAIT };
 
 struct SuperCopyConfig {
@@ -83,8 +52,8 @@ struct SuperCopyConfig {
     bool opt_direct_io;           
     bool opt_pin_cpu;             
     bool opt_zero_copy;
-    bool opt_eht; // Enable Hyper-Threading
-    std::vector<ULONG_PTR> cpu_masks; // 可用的 CPU 核心遮罩
+    bool opt_eht; 
+    std::vector<ULONG_PTR> cpu_masks; 
 };
 
 // ==========================================
@@ -209,14 +178,14 @@ public:
           sync_disk_N1(config.sync_mode), sync_disk_N2(config.sync_mode) {
         
         const size_t TWO_GB = 2ULL * 1024 * 1024 * 1024;
-        const size_t ONE_GB = 1ULL * 1024 * 1024 * 1024;
+        size_t half_N = cfg.total_ram_bytes / 2; // 每個 Buffer 的大小 (N/2)
 
         if (cfg.total_ram_bytes % TWO_GB != 0) 
             throw std::invalid_argument(g_lang == Lang::TW ? "RAM 必須是 2GB 的倍數" : "RAM must be a multiple of 2GB");
         if ((cfg.chunk_size_bytes & (cfg.chunk_size_bytes - 1)) != 0) 
             throw std::invalid_argument(g_lang == Lang::TW ? "Chunk 必須是 2 的次方" : "Chunk size must be a power of 2");
-        if (cfg.chunk_size_bytes > ONE_GB) 
-            throw std::invalid_argument(g_lang == Lang::TW ? "Chunk 最大限制為 1GB" : "Max chunk size is 1GB");
+        if (cfg.chunk_size_bytes > half_N) 
+            throw std::invalid_argument(g_lang == Lang::TW ? "Chunk 最大限制為 N/2 (RAM 總量的一半)" : "Max chunk size is N/2 (Half of total RAM)");
     }
 
     ~SuperCopyEngine() {
@@ -415,23 +384,25 @@ void PrintHelp() {
         std::wcout << L"SuperCopy 極速複製引擎\n"
                    << L"用法: supercopy.exe <來源> <目的> [選項 (大小寫不拘)]\n\n"
                    << L"參數選項:\n"
+                   << L"  --helpH         顯示此說明畫面\n"
                    << L"  --lang <TW|US>  切換語言，預設: TW\n"
                    << L"  --ram <GB>      緩衝區大小(2的倍數)，預設: 8\n"
-                   << L"  --chunk <MB>    切片大小(最大1024)，預設: 16\n"
-                   << L"  --RFD <N>       readfromdisk 數量，預設: CPU核心數/2\n"
-                   << L"  --WTD <N>       writetodisk 數量，預設: CPU核心數/2\n"
+                   << L"  --chunk <MB>    切片大小(最大為RAM的一半 N/2)，預設: 16\n"
+                   << L"  --RFD <N>       readfromdisk 數量，預設: 可用核心數/2\n"
+                   << L"  --WTD <N>       writetodisk 數量，預設: 可用核心數/2\n"
                    << L"  --SW            啟用 Smart Wait (預設為極限自旋)\n"
                    << L"  --NDIO          關閉 Direct I/O (不繞過快取)\n"
                    << L"  --NPCPU         關閉 CPU 綁核\n"
                    << L"  --ZC            啟用 Zero-Copy (系統底層拷貝)\n"
-                   << L"  --EHT           啟用超線程分配 (預設僅使用實體核心)\n";
+                   << L"  --EHT           強制啟用超線程分配\n";
     } else {
         std::wcout << L"SuperCopy Ultimate Engine\n"
                    << L"Usage: supercopy.exe <Src> <Dst> [Options (Case-Insensitive)]\n\n"
                    << L"Options:\n"
+                   << L"  --helpH         Show this help message\n"
                    << L"  --lang <TW|US>  Switch language, Default: TW\n"
                    << L"  --ram <GB>      Buffer size (Multiple of 2), Default: 8\n"
-                   << L"  --chunk <MB>    Chunk size (Max 1024), Default: 16\n"
+                   << L"  --chunk <MB>    Chunk size (Max N/2 of RAM), Default: 16\n"
                    << L"  --RFD <N>       readfromdisk threads, Default: Cores/2\n"
                    << L"  --WTD <N>       writetodisk threads, Default: Cores/2\n"
                    << L"  --SW            Enable Smart Wait\n"
@@ -446,7 +417,7 @@ int wmain(int argc, wchar_t* argv[]) {
     setlocale(LC_ALL, "");
     SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE);
 
-    // 第一階段：掃描語言設定 (確保錯誤訊息顯示正確)
+    // 1. 優先掃描語言 (確保錯誤訊息語言正確) 與 helpH (獨立跳出)
     for (int i = 1; i < argc; ++i) {
         std::wstring arg = argv[i];
         std::transform(arg.begin(), arg.end(), arg.begin(), ::towlower);
@@ -454,6 +425,9 @@ int wmain(int argc, wchar_t* argv[]) {
             std::wstring lang_val = argv[i+1];
             std::transform(lang_val.begin(), lang_val.end(), lang_val.begin(), ::towlower);
             if (lang_val == L"us") g_lang = Lang::US;
+        } else if (arg == L"--helph") {
+            PrintHelp();
+            return 0;
         }
     }
 
@@ -468,7 +442,7 @@ int wmain(int argc, wchar_t* argv[]) {
     SuperCopyConfig config;
     config.total_ram_bytes = 8ULL * 1024 * 1024 * 1024;  // 預設 8GB
     config.chunk_size_bytes = 16 * 1024 * 1024;          // 預設 16MB
-    config.num_rfd = 0; // 0 代表尚未設定，等待自動配置
+    config.num_rfd = 0; 
     config.num_wtd = 0; 
     config.sync_mode = SyncMode::EXTREME_SPIN;
     config.opt_direct_io = true;
@@ -476,23 +450,70 @@ int wmain(int argc, wchar_t* argv[]) {
     config.opt_zero_copy = false;
     config.opt_eht = false;
 
-    // 第二階段：掃描 EHT 參數 (必須先知道是否啟用超線程，才能計算可用核心)
+    // 2. 優先掃描使用者是否輸入 EHT 與 NPCPU
     for (int i = 3; i < argc; ++i) {
         std::wstring arg = argv[i];
         std::transform(arg.begin(), arg.end(), arg.begin(), ::towlower);
         if (arg == L"--eht") config.opt_eht = true;
+        if (arg == L"--npcpu") config.opt_pin_cpu = false;
     }
 
-    // 計算可用 CPU 核心
-    config.cpu_masks = GetCpuMasks(config.opt_eht);
+    // 3. 硬體感知：計算實體與邏輯核心
+    DWORD len = 0;
+    GetLogicalProcessorInformation(nullptr, &len);
+    std::vector<SYSTEM_LOGICAL_PROCESSOR_INFORMATION> buffer(len / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION));
+    GetLogicalProcessorInformation(buffer.data(), &len);
+
+    int phys_cores = 0;
+    int log_cores = 0;
+    for (const auto& info : buffer) {
+        if (info.Relationship == RelationProcessorCore) {
+            phys_cores++;
+            ULONG_PTR m = info.ProcessorMask;
+            for (int bit = 0; bit < sizeof(ULONG_PTR) * 8; ++bit) {
+                if (m & (1ULL << bit)) log_cores++;
+            }
+        }
+    }
+    bool has_ht = (log_cores > phys_cores);
+
+    // 4. 極端環境保護機制 (實體核心數預設基準線判斷)
+    bool eht_auto_enabled = false;
+    bool pin_auto_disabled = false;
+
+    if (phys_cores <= 2) {
+        if (has_ht) {
+            config.opt_eht = true; // 強制啟用 HT
+            eht_auto_enabled = true;
+        } else {
+            config.opt_pin_cpu = false; // 強制關閉綁核
+            pin_auto_disabled = true;
+        }
+    }
+
+    // 5. 建立核心遮罩
+    config.cpu_masks.clear();
+    for (const auto& info : buffer) {
+        if (info.Relationship == RelationProcessorCore) {
+            if (!config.opt_eht) {
+                ULONG_PTR m = info.ProcessorMask;
+                config.cpu_masks.push_back(m & (0 - m));
+            } else {
+                ULONG_PTR m = info.ProcessorMask;
+                for (int bit = 0; bit < sizeof(ULONG_PTR) * 8; ++bit) {
+                    if (m & (1ULL << bit)) config.cpu_masks.push_back(1ULL << bit);
+                }
+            }
+        }
+    }
     size_t available_cores = config.cpu_masks.size();
 
-    // 第三階段：解析剩餘參數 (大小寫脫敏)
+    // 6. 掃描剩餘參數
     for (int i = 3; i < argc; ++i) {
         std::wstring arg = argv[i];
         std::transform(arg.begin(), arg.end(), arg.begin(), ::towlower);
         
-        if (arg == L"--lang" || arg == L"--eht") {
+        if (arg == L"--lang" || arg == L"--eht" || arg == L"--npcpu" || arg == L"--helph") {
             if (arg == L"--lang") i++; 
             continue;
         } else if (arg == L"--ram" && i + 1 < argc) {
@@ -507,8 +528,6 @@ int wmain(int argc, wchar_t* argv[]) {
             config.sync_mode = SyncMode::SMART_WAIT;
         } else if (arg == L"--ndio") {
             config.opt_direct_io = false;
-        } else if (arg == L"--npcpu") {
-            config.opt_pin_cpu = false;
         } else if (arg == L"--zc") {
             config.opt_zero_copy = true;
         } else {
@@ -518,11 +537,9 @@ int wmain(int argc, wchar_t* argv[]) {
         }
     }
 
-    // 自動配置工人數量 (若使用者未輸入)
     if (config.num_rfd == 0) config.num_rfd = std::max<int>(1, available_cores / 2);
     if (config.num_wtd == 0) config.num_wtd = std::max<int>(1, available_cores / 2);
 
-    // CPU 配置上限驗證 (RFD + WTD 不得超過可用核心數)
     if (config.num_rfd + config.num_wtd > available_cores) {
         std::wcerr << Msg(
             L"[錯誤] 設定的 RFD 與 WTD 總數超過可用核心上限。\n(當前可用核心: ", 
@@ -537,11 +554,21 @@ int wmain(int argc, wchar_t* argv[]) {
     try {
         std::wcout << L"=========================================\n"
                    << Msg(L"  SuperCopy 極速複製啟動\n", L"  SuperCopy Engine Started\n")
-                   << L"=========================================\n"
-                   << Msg(L"來源: ", L"Src : ") << src << L"\n"
-                   << Msg(L"目的: ", L"Dst : ") << dst << L"\n"
-                   << Msg(L"記憶體: ", L"RAM : ") << (config.total_ram_bytes / 1024 / 1024 / 1024) << L" GB\n"
-                   << Msg(L"總核心: ", L"Core: ") << available_cores << Msg(L" (RFD:", L" (RFD:") << config.num_rfd << Msg(L", WTD:", L", WTD:") << config.num_wtd << L")\n"
+                   << L"=========================================\n";
+                   
+        // 顯示自動回退機制的系統提示
+        if (eht_auto_enabled) {
+            std::wcout << Msg(L"  [系統] 實體核心數 <= 2，自動強制啟用超線程 (--EHT)\n",
+                              L"  [Sys] Physical cores <= 2, auto-enabled Hyper-Threading (--EHT)\n");
+        } else if (pin_auto_disabled) {
+            std::wcout << Msg(L"  [系統] 實體核心數 <= 2 且無超線程，自動關閉綁核 (--NPCPU)\n",
+                              L"  [Sys] Physical cores <= 2 without HT, auto-disabled CPU pinning (--NPCPU)\n");
+        }
+
+        std::wcout << Msg(L"  來源: ", L"  Src : ") << src << L"\n"
+                   << Msg(L"  目的: ", L"  Dst : ") << dst << L"\n"
+                   << Msg(L"  記憶體: ", L"  RAM : ") << (config.total_ram_bytes / 1024 / 1024 / 1024) << L" GB\n"
+                   << Msg(L"  總核心: ", L"  Core: ") << available_cores << Msg(L" (RFD:", L" (RFD:") << config.num_rfd << Msg(L", WTD:", L", WTD:") << config.num_wtd << L")\n"
                    << L"=========================================\n\n";
 
         SuperCopyEngine engine(src, dst, config);
