@@ -22,7 +22,7 @@ jobs:
     # 3. 執行編譯指令 (開啟最高 O2 最佳化)
     - name: Compile SuperCopy
       run: |
-        cl /EHsc /O2 /std:c++17 supercopy.cpp
+        cl /EHsc /O2 /std:c++17 SuperCopy.cpp
 
     # 4. 將編譯好的 exe 檔打包讓你下載
     - name: Upload EXE Artifact
