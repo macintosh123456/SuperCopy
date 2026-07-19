@@ -4,6 +4,7 @@ name: Build SuperCopy (Windows)
 on:
   push:
     branches: [ "main" ]
+    workflow_dispatch:
 
 jobs:
   build:
