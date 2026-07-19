@@ -23,8 +23,8 @@ supercopy.exe D:\data.raw E:\data.raw --lang tw --ram 16 --RFD 12 --WTD 12 --EHT
 | 參數 | 說明 | 預設值 |
 | ------------------ | -------------------------------- | ---- |
 | --lang <TW/US>     | 切換輸出語言 (繁體中文/美式英語)    | TW |
-| --ram <GB>         | 必須為 2 的倍數                   | 8 |
-| --chunk <MB>       | 設定底層每次 I/O 請求的切片大小，最大為 1024 (1GB) | 16 |
+| --ram <GB>         | 必須為 2 的倍數                   | 8GB |
+| --chunk <MB>       | 設定底層每次 I/O 請求的切片大小，最大為 1024 (1GB) | 16MB |
 | --RFD <N>          | 設定 readfromdisk 的數量。注意：RFD+WTD 總數不得超過可用核心數 | 可用核心/2 |
 | --WTD <N>          | 設定 writetodisk 的數量 | 可用核心/2 |
 | --SW               | 啟用 Smart Wait 智慧等待模式，讓出 CPU 資源避免過載 | 關閉 (自旋) |
@@ -59,8 +59,8 @@ Parameter Options (Case-Insensitive)
 | Parameter | Description | Default |
 | ------------------ | -------------------------------- | ---- |
 | --lang <TW/US>     | Switch output language (Traditional Chinese / US English)    | TW |
-| --ram <GB>         | Set total buffer pool size. Must be a multiple of 2                   | 8 |
-| --chunk <MB>       | --chunk <MB>Set I/O request chunk size. Maximum is 1024 (1GB) | 16 |
+| --ram <GB>         | Set total buffer pool size. Must be a multiple of 2                   | 8GB |
+| --chunk <MB>       | --chunk <MB>Set I/O request chunk size. Maximum is 1024 (1GB) | 16MB |
 | --RFD <N>          | --RFD <N>Number of readfromdisk threads. Note: RFD+WTD must not exceed available cores | Cores/2 |
 | --WTD <N>          | Number of writetodisk threads | Cores/2 |
 | --SW               | Enable Smart Wait mode to yield CPU resources | Off (Spin) |
