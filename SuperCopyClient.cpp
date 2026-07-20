@@ -10,6 +10,15 @@
 // 啟用 Windows 現代視覺樣式
 #pragma comment(linker,"\"/manifestdependency:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
+// ==========================================
+// 補上缺少的 Windows 函式庫連結
+// ==========================================
+#pragma comment(lib, "User32.lib")    // 負責 GetMessage, CreateWindowEx 等 UI 核心
+#pragma comment(lib, "Advapi32.lib")  // 負責 UAC 權限與 Token 檢查
+#pragma comment(lib, "Shell32.lib")   // 負責 ShellExecuteExW 執行外部程式
+#pragma comment(lib, "Gdi32.lib")     // 負責 CreateFontW 字型繪製
+#pragma comment(lib, "Ole32.lib")     // 負責基礎 COM 元件
+
 namespace fs = std::filesystem;
 
 // ==========================================
