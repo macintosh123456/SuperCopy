@@ -2,7 +2,6 @@
 #define _UNICODE
 #define NOMINMAX
 #include <windows.h>
-#include <commctrl.h>
 #include <shlobj.h>
 #include <filesystem>
 #include <string>
