@@ -21,7 +21,7 @@
 namespace fs = std::filesystem;
 
 // ==========================================
-// 全域狀態與 INI 配置
+// 全域變數與參數設定狀態
 // ==========================================
 struct AppConfig {
     std::wstring exe_path = L"supercopy.exe";
@@ -35,6 +35,7 @@ struct AppConfig {
     bool lang_us = false; // false = TW, true = US
 } g_config;
 
+// UI 介面控制代碼 (新增 hLblExePath 以利動態切換語言)
 HWND hMainWnd, hExePathEdit, hBtnBrowseExe, hLblExePath;
 HWND hLeftList, hRightList, hLeftPath, hRightPath;
 HWND hLeftDrv, hRightDrv; 
@@ -43,6 +44,7 @@ HWND hBtnCopyL2R;
 std::wstring currentLeftPath = L"C:\\";
 std::wstring currentRightPath = L"D:\\";
 
+// 選單與控制項 ID 定義
 #define IDM_RAM_4   101
 #define IDM_RAM_8   102
 #define IDM_RAM_16  103
@@ -64,16 +66,15 @@ std::wstring currentRightPath = L"D:\\";
 #define ID_RGHT_LST   202
 #define ID_LEFT_DRV   203
 #define ID_RGHT_DRV   204
-#define ID_BTN_BROWSE 205
+#define ID_BTN_BROWSE 205 
 
-// 多語系輔助函數
+// ==========================================
+// 語言輔助與 INI 檔案邏輯
+// ==========================================
 std::wstring Msg(const wchar_t* tw, const wchar_t* us) {
     return g_config.lang_us ? us : tw;
 }
 
-// ==========================================
-// INI 檔案讀寫邏輯
-// ==========================================
 std::wstring GetIniPath() {
     wchar_t path[MAX_PATH];
     GetModuleFileNameW(NULL, path, MAX_PATH);
@@ -84,14 +85,12 @@ std::wstring GetIniPath() {
 void SaveConfig() {
     std::wstring ini = GetIniPath();
     
-    // 儲存文字路徑
     wchar_t exeBuf[MAX_PATH];
     GetWindowTextW(hExePathEdit, exeBuf, MAX_PATH);
     WritePrivateProfileStringW(L"Paths", L"ExePath", exeBuf, ini.c_str());
     WritePrivateProfileStringW(L"Paths", L"LeftPath", currentLeftPath.c_str(), ini.c_str());
     WritePrivateProfileStringW(L"Paths", L"RightPath", currentRightPath.c_str(), ini.c_str());
 
-    // 儲存參數
     WritePrivateProfileStringW(L"Config", L"LangUS", g_config.lang_us ? L"1" : L"0", ini.c_str());
     WritePrivateProfileStringW(L"Config", L"RAM", std::to_wstring(g_config.ram_gb).c_str(), ini.c_str());
     WritePrivateProfileStringW(L"Config", L"Chunk", std::to_wstring(g_config.chunk_mb).c_str(), ini.c_str());
@@ -124,8 +123,29 @@ void LoadConfig() {
 }
 
 // ==========================================
-// UI 動態語系切換與選單建立
+// 動態選單與語言切換
 // ==========================================
+void UpdateMenuState(HMENU hMenu) {
+    CheckMenuItem(hMenu, IDM_RAM_4,  (g_config.ram_gb == 4)  ? MF_CHECKED : MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_RAM_8,  (g_config.ram_gb == 8)  ? MF_CHECKED : MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_RAM_16, (g_config.ram_gb == 16) ? MF_CHECKED : MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_RAM_32, (g_config.ram_gb == 32) ? MF_CHECKED : MF_UNCHECKED);
+    
+    CheckMenuItem(hMenu, IDM_CHK_8,   (g_config.chunk_mb == 8)   ? MF_CHECKED : MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_CHK_16,  (g_config.chunk_mb == 16)  ? MF_CHECKED : MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_CHK_64,  (g_config.chunk_mb == 64)  ? MF_CHECKED : MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_CHK_256, (g_config.chunk_mb == 256) ? MF_CHECKED : MF_UNCHECKED);
+
+    CheckMenuItem(hMenu, IDM_SW,    g_config.sw ? MF_CHECKED : MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_NDIO,  g_config.ndio ? MF_CHECKED : MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_NPCPU, g_config.npcpu ? MF_CHECKED : MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_ZC,    g_config.zc ? MF_CHECKED : MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_EHT,   g_config.eht ? MF_CHECKED : MF_UNCHECKED);
+
+    CheckMenuItem(hMenu, IDM_LANG_TW, !g_config.lang_us ? MF_CHECKED : MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_LANG_US, g_config.lang_us ? MF_CHECKED : MF_UNCHECKED);
+}
+
 HMENU BuildMenu() {
     HMENU hMenu = CreateMenu();
     HMENU hMenuLang = CreatePopupMenu();
@@ -157,27 +177,6 @@ HMENU BuildMenu() {
     AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hMenuOpt, Msg(L"引擎進階選項", L"Engine Options").c_str());
     
     return hMenu;
-}
-
-void UpdateMenuState(HMENU hMenu) {
-    CheckMenuItem(hMenu, IDM_RAM_4,  (g_config.ram_gb == 4)  ? MF_CHECKED : MF_UNCHECKED);
-    CheckMenuItem(hMenu, IDM_RAM_8,  (g_config.ram_gb == 8)  ? MF_CHECKED : MF_UNCHECKED);
-    CheckMenuItem(hMenu, IDM_RAM_16, (g_config.ram_gb == 16) ? MF_CHECKED : MF_UNCHECKED);
-    CheckMenuItem(hMenu, IDM_RAM_32, (g_config.ram_gb == 32) ? MF_CHECKED : MF_UNCHECKED);
-    
-    CheckMenuItem(hMenu, IDM_CHK_8,   (g_config.chunk_mb == 8)   ? MF_CHECKED : MF_UNCHECKED);
-    CheckMenuItem(hMenu, IDM_CHK_16,  (g_config.chunk_mb == 16)  ? MF_CHECKED : MF_UNCHECKED);
-    CheckMenuItem(hMenu, IDM_CHK_64,  (g_config.chunk_mb == 64)  ? MF_CHECKED : MF_UNCHECKED);
-    CheckMenuItem(hMenu, IDM_CHK_256, (g_config.chunk_mb == 256) ? MF_CHECKED : MF_UNCHECKED);
-
-    CheckMenuItem(hMenu, IDM_SW,    g_config.sw ? MF_CHECKED : MF_UNCHECKED);
-    CheckMenuItem(hMenu, IDM_NDIO,  g_config.ndio ? MF_CHECKED : MF_UNCHECKED);
-    CheckMenuItem(hMenu, IDM_NPCPU, g_config.npcpu ? MF_CHECKED : MF_UNCHECKED);
-    CheckMenuItem(hMenu, IDM_ZC,    g_config.zc ? MF_CHECKED : MF_UNCHECKED);
-    CheckMenuItem(hMenu, IDM_EHT,   g_config.eht ? MF_CHECKED : MF_UNCHECKED);
-
-    CheckMenuItem(hMenu, IDM_LANG_TW, !g_config.lang_us ? MF_CHECKED : MF_UNCHECKED);
-    CheckMenuItem(hMenu, IDM_LANG_US, g_config.lang_us ? MF_CHECKED : MF_UNCHECKED);
 }
 
 void UpdateUILanguage() {
@@ -216,7 +215,7 @@ void ElevatePrivileges() {
         sei.lpFile = szPath;
         sei.nShow = SW_NORMAL;
         if (!ShellExecuteExW(&sei)) {
-            MessageBoxW(NULL, L"Must run as Admin!", L"Permission Error", MB_ICONERROR);
+            MessageBoxW(NULL, Msg(L"必須以系統管理員身分執行！", L"Must run as Admin!").c_str(), Msg(L"權限錯誤", L"Permission Error").c_str(), MB_ICONERROR);
             ExitProcess(1);
         }
         ExitProcess(0);
@@ -241,7 +240,11 @@ void BrowseForEngine() {
     ofn.hwndOwner = hMainWnd;
     ofn.lpstrFile = szFile;
     ofn.nMaxFile = sizeof(szFile) / sizeof(wchar_t);
-    ofn.lpstrFilter = L"Executable (*.exe)\0*.exe\0All Files (*.*)\0*.*\0";
+    if (g_config.lang_us) {
+        ofn.lpstrFilter = L"Executable (*.exe)\0*.exe\0All Files (*.*)\0*.*\0";
+    } else {
+        ofn.lpstrFilter = L"執行檔 (*.exe)\0*.exe\0所有檔案 (*.*)\0*.*\0";
+    }
     ofn.nFilterIndex = 1;
     ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_HIDEREADONLY;
 
@@ -316,7 +319,7 @@ void HandleDriveChange(HWND hCombo, HWND hList, HWND hLabel, std::wstring& curre
     SendMessageW(hCombo, CB_GETLBTEXT, idx, (LPARAM)buf);
     currentPath = buf; 
     LoadDirectory(hList, hLabel, currentPath);
-    SaveConfig(); 
+    SaveConfig();
 }
 
 void ExecuteEngine() {
@@ -353,10 +356,10 @@ void ExecuteEngine() {
     sei.lpParameters = fullCmd.c_str();
     sei.nShow = SW_SHOW;
     
-    SaveConfig(); 
+    SaveConfig();
 
     if (!ShellExecuteExW(&sei)) {
-        MessageBoxW(hMainWnd, Msg(L"無法啟動引擎，請確認路徑。", L"Failed to start engine.").c_str(), L"Error", MB_ICONERROR);
+        MessageBoxW(hMainWnd, Msg(L"無法啟動引擎，請確認路徑。", L"Failed to start engine.").c_str(), Msg(L"錯誤", L"Error").c_str(), MB_ICONERROR);
     }
 }
 
@@ -368,8 +371,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_CREATE: {
             LoadConfig();
 
-            hLblExePath = CreateWindowW(L"STATIC", L"", WS_CHILD | WS_VISIBLE, 10, 10, 200, 20, hwnd, NULL, NULL, NULL);
-            hExePathEdit = CreateWindowW(L"EDIT", g_config.exe_path.c_str(), WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 215, 8, 470, 24, hwnd, NULL, NULL, NULL);
+            // 改為動態載入的 UI 元件
+            hLblExePath = CreateWindowW(L"STATIC", L"", WS_CHILD | WS_VISIBLE, 10, 10, 190, 20, hwnd, NULL, NULL, NULL);
+            hExePathEdit = CreateWindowW(L"EDIT", g_config.exe_path.c_str(), WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 205, 8, 480, 24, hwnd, NULL, NULL, NULL);
             hBtnBrowseExe = CreateWindowW(L"BUTTON", L"", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 695, 7, 75, 26, hwnd, (HMENU)ID_BTN_BROWSE, NULL, NULL);
 
             hLeftDrv = CreateWindowW(L"COMBOBOX", NULL, WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL, 10, 40, 370, 200, hwnd, (HMENU)ID_LEFT_DRV, NULL, NULL);
@@ -394,6 +398,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             int d_idx = (int)SendMessageW(hRightDrv, CB_FINDSTRINGEXACT, -1, (LPARAM)rightRoot.c_str());
             SendMessageW(hRightDrv, CB_SETCURSEL, d_idx != CB_ERR ? d_idx : 0, 0);
 
+            // 建立選單並套用語言
             UpdateUILanguage();
 
             LoadDirectory(hLeftList, hLeftPath, currentLeftPath);
@@ -441,12 +446,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             
             if (configChanged) {
                 UpdateMenuState(GetMenu(hwnd));
-                SaveConfig(); 
+                SaveConfig();
             }
             break;
         }
         case WM_DESTROY:
-            SaveConfig(); 
+            SaveConfig();
             PostQuitMessage(0);
             break;
         default:
