@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <system_error>
 
 #pragma comment(linker,"\"/manifestdependency:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 #pragma comment(lib, "User32.lib")
@@ -32,7 +33,7 @@ struct AppConfig {
     bool npcpu = false;
     bool zc = false;
     bool eht = false;
-    bool lang_us = false; // false = TW, true = US
+    bool lang_us = false;
 } g_config;
 
 HWND hMainWnd, hExePathEdit, hBtnBrowseExe, hLblExePath;
@@ -43,7 +44,6 @@ HWND hBtnCopyL2R;
 std::wstring currentLeftPath = L"C:\\";
 std::wstring currentRightPath = L"D:\\";
 
-// 選單與控制項 ID 定義
 #define IDM_RAM_4   101
 #define IDM_RAM_8   102
 #define IDM_RAM_16  103
@@ -178,7 +178,6 @@ HMENU BuildMenu() {
     return hMenu;
 }
 
-// 修正：傳入 hwnd，確保綁定在正確的視窗實體上
 void UpdateUILanguage(HWND hwnd) {
     SetWindowTextW(hwnd, Msg(L"SuperCopy V7 控制中心", L"SuperCopy V7 Control Center").c_str());
     SetWindowTextW(hLblExePath, Msg(L"SuperCopy.exe 引擎路徑:", L"SuperCopy.exe Engine Path:").c_str());
@@ -268,16 +267,17 @@ void LoadDirectory(HWND hList, HWND hLabel, std::wstring& currentPath) {
         SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)Msg(L"[ .. ] (返回上一層)", L"[ .. ] (Go Up)").c_str());
     }
 
-    try {
-        for (const auto& entry : fs::directory_iterator(currentPath)) {
-            std::wstring name = entry.path().filename().wstring();
-            if (fs::is_directory(entry.status())) {
-                folders.push_back(L"[DIR] " + name);
-            } else {
-                files.push_back(name);
-            }
+    // 強化：忽略沒有權限的系統資料夾，避免發生崩潰或停止讀取
+    std::error_code ec;
+    for (const auto& entry : fs::directory_iterator(currentPath, fs::directory_options::skip_permission_denied, ec)) {
+        if (ec) continue; // 跳過無法存取的檔案
+        std::wstring name = entry.path().filename().wstring();
+        if (entry.is_directory(ec)) {
+            folders.push_back(L"[DIR] " + name);
+        } else {
+            files.push_back(name);
         }
-    } catch (...) { }
+    }
 
     std::sort(folders.begin(), folders.end());
     std::sort(files.begin(), files.end());
@@ -295,9 +295,18 @@ void HandleListDoubleClick(HWND hList, HWND hLabel, std::wstring& currentPath) {
     std::wstring selection(buf);
 
     if (selection == Msg(L"[ .. ] (返回上一層)", L"[ .. ] (Go Up)")) {
-        fs::path p(currentPath);
+        // [修正1]：徹底解決斜線干擾返回上一層的陷阱
+        std::wstring tempPath = currentPath;
+        if (tempPath.length() > 3 && tempPath.back() == L'\\') {
+            tempPath.pop_back(); // 先拔除尾端斜線
+        }
+        
+        fs::path p(tempPath);
         currentPath = p.parent_path().wstring();
-        if (currentPath.back() != L'\\') currentPath += L"\\";
+        
+        if (currentPath.empty()) currentPath = L"C:\\"; // 防呆機制
+        if (currentPath.back() != L'\\') currentPath += L"\\"; // 保證目錄格式
+        
         LoadDirectory(hList, hLabel, currentPath);
     } 
     else if (selection.substr(0, 6) == L"[DIR] ") {
@@ -322,6 +331,14 @@ void HandleDriveChange(HWND hCombo, HWND hList, HWND hLabel, std::wstring& curre
     SaveConfig();
 }
 
+// [修正2]：保護路徑不被結尾斜線破壞 CMD 命令結構
+std::wstring EscapeTrailingSlash(std::wstring p) {
+    if (!p.empty() && p.back() == L'\\') {
+        p += L"\\"; // 例如將 D:\ 變成 D:\\，這樣才不會吃掉 CMD 裡的雙引號
+    }
+    return p;
+}
+
 void ExecuteEngine() {
     wchar_t exeBuf[MAX_PATH];
     GetWindowTextW(hExePathEdit, exeBuf, MAX_PATH);
@@ -338,18 +355,21 @@ void ExecuteEngine() {
     }
     std::wstring dstPath = currentRightPath;
 
-    std::wstring cmd = L"\"" + exePath + L"\" \"" + srcPath + L"\" \"" + dstPath + L"\"";
-    cmd += L" --ram " + std::to_wstring(g_config.ram_gb);
-    cmd += L" --chunk " + std::to_wstring(g_config.chunk_mb);
-    cmd += g_config.lang_us ? L" --lang US" : L" --lang TW"; 
+    // 將路徑經過 EscapeTrailingSlash 保護後，再組合字串
+    std::wstring cmdArgs = L"\"" + exePath + L"\" \"" + EscapeTrailingSlash(srcPath) + L"\" \"" + EscapeTrailingSlash(dstPath) + L"\"";
+    cmdArgs += L" --ram " + std::to_wstring(g_config.ram_gb);
+    cmdArgs += L" --chunk " + std::to_wstring(g_config.chunk_mb);
+    cmdArgs += g_config.lang_us ? L" --lang US" : L" --lang TW"; 
     
-    if (g_config.sw) cmd += L" --sw";
-    if (g_config.ndio) cmd += L" --ndio";
-    if (g_config.npcpu) cmd += L" --npcpu";
-    if (g_config.zc) cmd += L" --zc";
-    if (g_config.eht) cmd += L" --eht";
+    if (g_config.sw) cmdArgs += L" --sw";
+    if (g_config.ndio) cmdArgs += L" --ndio";
+    if (g_config.npcpu) cmdArgs += L" --npcpu";
+    if (g_config.zc) cmdArgs += L" --zc";
+    if (g_config.eht) cmdArgs += L" --eht";
 
-    std::wstring fullCmd = L"/k " + cmd; 
+    // 外層再加上一對引號，完美適配 cmd.exe 的跳脫機制
+    std::wstring fullCmd = L"/k \" " + cmdArgs + L" \""; 
+    
     SHELLEXECUTEINFOW sei = { sizeof(sei) };
     sei.lpVerb = L"open";
     sei.lpFile = L"cmd.exe";
@@ -371,7 +391,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_CREATE: {
             LoadConfig();
 
-            // 建立 UI 控制項
             hLblExePath = CreateWindowW(L"STATIC", L"", WS_CHILD | WS_VISIBLE, 10, 10, 190, 20, hwnd, NULL, NULL, NULL);
             hExePathEdit = CreateWindowW(L"EDIT", g_config.exe_path.c_str(), WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 205, 8, 480, 24, hwnd, NULL, NULL, NULL);
             hBtnBrowseExe = CreateWindowW(L"BUTTON", L"", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 695, 7, 75, 26, hwnd, (HMENU)ID_BTN_BROWSE, NULL, NULL);
@@ -398,7 +417,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             int d_idx = (int)SendMessageW(hRightDrv, CB_FINDSTRINGEXACT, -1, (LPARAM)rightRoot.c_str());
             SendMessageW(hRightDrv, CB_SETCURSEL, d_idx != CB_ERR ? d_idx : 0, 0);
 
-            // 呼叫更新時，將 hwnd 傳入，確保選單綁定成功
             UpdateUILanguage(hwnd);
 
             LoadDirectory(hLeftList, hLeftPath, currentLeftPath);
@@ -424,7 +442,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 case ID_BTN_BROWSE: BrowseForEngine(); break;
                 case ID_BTN_COPY: ExecuteEngine(); break;
 
-                // 更新語言時，同樣傳入 hwnd
                 case IDM_LANG_TW: g_config.lang_us = false; UpdateUILanguage(hwnd); configChanged = true; break;
                 case IDM_LANG_US: g_config.lang_us = true; UpdateUILanguage(hwnd); configChanged = true; break;
 
