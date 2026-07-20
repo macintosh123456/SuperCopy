@@ -1,37 +1,53 @@
 name: Build SuperCopy (Windows)
 
-# 當有程式碼推送到 main 分支時自動觸發
+# 程式碼推送到 main 時自動編譯，也允許手動執行
 on:
   push:
-    branches: [ "main" ]
-    
+    branches: ["main"]
+
   workflow_dispatch:
 
 jobs:
   build:
-    # 租用 GitHub 免費的最新 Windows 虛擬機
+    # 使用 GitHub 最新 Windows 虛擬機
     runs-on: windows-latest
 
     steps:
-    # 1. 取得你的程式碼
-    - name: Checkout Code
-      uses: actions/checkout@v4
+      # 1. 取得程式碼
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-    # 2. 載入微軟 C++ 編譯器環境 (MSVC)
-    - name: Setup MSVC
-      uses: ilammy/msvc-dev-cmd@v1
+      # 2. 載入 Microsoft Visual C++ 編譯環境
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
 
-    # 3. 執行編譯指令 (開啟最高 O2 最佳化)
-    - name: Compile SuperCopy
-      run: |
-        cl /EHsc /O2 /std:c++17 SuperCopy.cpp
-        cl /EHsc /O2 /std:c++17 SuperCopyClient.cpp
+      # 3. 編譯兩個程式
+      - name: Compile SuperCopy
+        run: |
+          cl /nologo /EHsc /O2 /std:c++17 /utf-8 /DUNICODE /D_UNICODE SuperCopy.cpp /Fe:SuperCopy.exe
+          cl /nologo /EHsc /O2 /std:c++17 /utf-8 /DUNICODE /D_UNICODE SuperCopyClient.cpp /Fe:SuperCopyClient.exe
 
-    # 4. 將編譯好的 exe 檔打包讓你下載
-    - name: Upload EXE Artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: SuperCopy-Windows-EXE
-        path: |
-          SuperCopy.exe
-          SuperCopyClient.exe
+      # 4. 確認輸出檔存在
+      - name: Verify EXE Files
+        shell: pwsh
+        run: |
+          if (!(Test-Path "SuperCopy.exe")) {
+            throw "SuperCopy.exe was not generated."
+          }
+
+          if (!(Test-Path "SuperCopyClient.exe")) {
+            throw "SuperCopyClient.exe was not generated."
+          }
+
+          Get-Item SuperCopy.exe, SuperCopyClient.exe |
+            Select-Object Name, Length, LastWriteTime
+
+      # 5. 將兩個 EXE 打包為同一份 Artifact
+      - name: Upload EXE Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: SuperCopy-Windows-EXE
+          path: |
+            SuperCopy.exe
+            SuperCopyClient.exe
+          if-no-files-found: error
