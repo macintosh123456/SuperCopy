@@ -1,5 +1,8 @@
+#define UNICODE
+#define _UNICODE
 #define NOMINMAX          
 #include <windows.h>
+#include <commctrl.h>
 #include <iostream>
 #include <thread>
 #include <atomic>
