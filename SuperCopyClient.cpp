@@ -129,8 +129,8 @@ void LoadConfig() {
 HMENU BuildMenu() {
     HMENU hMenu = CreateMenu();
     HMENU hMenuLang = CreatePopupMenu();
-    AppendMenuW(hMenuLang, MF_STRING, IDM_LANG_TW, Msg(L"繁體中文 (TW)", L"Traditional Chinese (TW)"));
-    AppendMenuW(hMenuLang, MF_STRING, IDM_LANG_US, Msg(L"English (US)", L"English (US)"));
+    AppendMenuW(hMenuLang, MF_STRING, IDM_LANG_TW, Msg(L"繁體中文 (TW)", L"Traditional Chinese (TW)").c_str());
+    AppendMenuW(hMenuLang, MF_STRING, IDM_LANG_US, Msg(L"English (US)", L"English (US)").c_str());
 
     HMENU hMenuRam = CreatePopupMenu();
     AppendMenuW(hMenuRam, MF_STRING, IDM_RAM_4, L"4 GB");
@@ -145,16 +145,16 @@ HMENU BuildMenu() {
     AppendMenuW(hMenuChunk, MF_STRING, IDM_CHK_256, L"256 MB");
 
     HMENU hMenuOpt = CreatePopupMenu();
-    AppendMenuW(hMenuOpt, MF_STRING, IDM_SW, Msg(L"Smart Wait (--SW)", L"Smart Wait (--SW)"));
-    AppendMenuW(hMenuOpt, MF_STRING, IDM_NDIO, Msg(L"No Direct I/O (--NDIO)", L"No Direct I/O (--NDIO)"));
-    AppendMenuW(hMenuOpt, MF_STRING, IDM_NPCPU, Msg(L"No Pin CPU (--NPCPU)", L"No Pin CPU (--NPCPU)"));
-    AppendMenuW(hMenuOpt, MF_STRING, IDM_ZC, Msg(L"Zero Copy (--ZC)", L"Zero Copy (--ZC)"));
-    AppendMenuW(hMenuOpt, MF_STRING, IDM_EHT, Msg(L"Enable Hyper-Threading (--EHT)", L"Enable Hyper-Threading (--EHT)"));
+    AppendMenuW(hMenuOpt, MF_STRING, IDM_SW, Msg(L"Smart Wait (--SW)", L"Smart Wait (--SW)").c_str());
+    AppendMenuW(hMenuOpt, MF_STRING, IDM_NDIO, Msg(L"No Direct I/O (--NDIO)", L"No Direct I/O (--NDIO)").c_str());
+    AppendMenuW(hMenuOpt, MF_STRING, IDM_NPCPU, Msg(L"No Pin CPU (--NPCPU)", L"No Pin CPU (--NPCPU)").c_str());
+    AppendMenuW(hMenuOpt, MF_STRING, IDM_ZC, Msg(L"Zero Copy (--ZC)", L"Zero Copy (--ZC)").c_str());
+    AppendMenuW(hMenuOpt, MF_STRING, IDM_EHT, Msg(L"Enable Hyper-Threading (--EHT)", L"Enable Hyper-Threading (--EHT)").c_str());
 
-    AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hMenuLang, Msg(L"引擎顯示語言", L"Language"));
-    AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hMenuRam, Msg(L"記憶體總量 (RAM)", L"Total RAM"));
-    AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hMenuChunk, Msg(L"分流界線 (Chunk)", L"File Threshold (Chunk)"));
-    AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hMenuOpt, Msg(L"引擎進階選項", L"Engine Options"));
+    AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hMenuLang, Msg(L"引擎顯示語言", L"Language").c_str());
+    AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hMenuRam, Msg(L"記憶體總量 (RAM)", L"Total RAM").c_str());
+    AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hMenuChunk, Msg(L"分流界線 (Chunk)", L"File Threshold (Chunk)").c_str());
+    AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hMenuOpt, Msg(L"引擎進階選項", L"Engine Options").c_str());
     
     return hMenu;
 }
@@ -181,13 +181,11 @@ void UpdateMenuState(HMENU hMenu) {
 }
 
 void UpdateUILanguage() {
-    // 更新視窗標題與控制項文字
-    SetWindowTextW(hMainWnd, Msg(L"SuperCopy V7 控制中心 (管理者模式)", L"SuperCopy V7 Control Center (Admin Mode)"));
-    SetWindowTextW(hLblExePath, Msg(L"SuperCopy.exe 引擎路徑:", L"SuperCopy.exe Engine Path:"));
-    SetWindowTextW(hBtnBrowseExe, Msg(L"瀏覽...", L"Browse..."));
-    SetWindowTextW(hBtnCopyL2R, Msg(L">>> 啟動 SuperCopy V7 (左側複製到右側) >>>", L">>> Launch SuperCopy V7 (Left to Right) >>>"));
+    SetWindowTextW(hMainWnd, Msg(L"SuperCopy V7 控制中心", L"SuperCopy V7 Control Center").c_str());
+    SetWindowTextW(hLblExePath, Msg(L"SuperCopy.exe 引擎路徑:", L"SuperCopy.exe Engine Path:").c_str());
+    SetWindowTextW(hBtnBrowseExe, Msg(L"瀏覽...", L"Browse...").c_str());
+    SetWindowTextW(hBtnCopyL2R, Msg(L">>> 啟動 SuperCopy V7 (左側複製到右側) >>>", L">>> Launch SuperCopy V7 (Left to Right) >>>").c_str());
 
-    // 重建選單以刷新語言
     HMENU hOldMenu = GetMenu(hMainWnd);
     HMENU hNewMenu = BuildMenu();
     SetMenu(hMainWnd, hNewMenu);
@@ -264,7 +262,7 @@ void LoadDirectory(HWND hList, HWND hLabel, std::wstring& currentPath) {
     std::vector<std::wstring> files;
 
     if (currentPath.length() > 3) {
-        SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)Msg(L"[ .. ] (返回上一層)", L"[ .. ] (Go Up)"));
+        SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)Msg(L"[ .. ] (返回上一層)", L"[ .. ] (Go Up)").c_str());
     }
 
     try {
@@ -307,7 +305,7 @@ void HandleListDoubleClick(HWND hList, HWND hLabel, std::wstring& currentPath) {
         if (currentPath.back() != L'\\') currentPath += L"\\";
         LoadDirectory(hList, hLabel, currentPath);
     }
-    SaveConfig(); // 資料夾變更時儲存
+    SaveConfig();
 }
 
 void HandleDriveChange(HWND hCombo, HWND hList, HWND hLabel, std::wstring& currentPath) {
@@ -318,7 +316,7 @@ void HandleDriveChange(HWND hCombo, HWND hList, HWND hLabel, std::wstring& curre
     SendMessageW(hCombo, CB_GETLBTEXT, idx, (LPARAM)buf);
     currentPath = buf; 
     LoadDirectory(hList, hLabel, currentPath);
-    SaveConfig(); // 磁碟機變更時儲存
+    SaveConfig(); 
 }
 
 void ExecuteEngine() {
@@ -355,10 +353,10 @@ void ExecuteEngine() {
     sei.lpParameters = fullCmd.c_str();
     sei.nShow = SW_SHOW;
     
-    SaveConfig(); // 執行前做最後一次安全儲存
+    SaveConfig(); 
 
     if (!ShellExecuteExW(&sei)) {
-        MessageBoxW(hMainWnd, Msg(L"無法啟動引擎，請確認路徑。", L"Failed to start engine."), L"Error", MB_ICONERROR);
+        MessageBoxW(hMainWnd, Msg(L"無法啟動引擎，請確認路徑。", L"Failed to start engine.").c_str(), L"Error", MB_ICONERROR);
     }
 }
 
@@ -368,10 +366,8 @@ void ExecuteEngine() {
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
         case WM_CREATE: {
-            // 優先讀取 INI 設定
             LoadConfig();
 
-            // UI 佈局
             hLblExePath = CreateWindowW(L"STATIC", L"", WS_CHILD | WS_VISIBLE, 10, 10, 200, 20, hwnd, NULL, NULL, NULL);
             hExePathEdit = CreateWindowW(L"EDIT", g_config.exe_path.c_str(), WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 215, 8, 470, 24, hwnd, NULL, NULL, NULL);
             hBtnBrowseExe = CreateWindowW(L"BUTTON", L"", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 695, 7, 75, 26, hwnd, (HMENU)ID_BTN_BROWSE, NULL, NULL);
@@ -386,7 +382,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
             hBtnCopyL2R = CreateWindowW(L"BUTTON", L"", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 10, 500, 760, 40, hwnd, (HMENU)ID_BTN_COPY, NULL, NULL);
             
-            // 初始化硬碟選單，並套用 INI 記錄的磁碟機
             PopulateDrives(hLeftDrv);
             PopulateDrives(hRightDrv);
             
@@ -399,7 +394,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             int d_idx = (int)SendMessageW(hRightDrv, CB_FINDSTRINGEXACT, -1, (LPARAM)rightRoot.c_str());
             SendMessageW(hRightDrv, CB_SETCURSEL, d_idx != CB_ERR ? d_idx : 0, 0);
 
-            // 首次套用多語系與更新選單
             UpdateUILanguage();
 
             LoadDirectory(hLeftList, hLeftPath, currentLeftPath);
@@ -420,7 +414,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 if (wmId == ID_RGHT_DRV) HandleDriveChange(hRightDrv, hRightList, hRightPath, currentRightPath);
             }
             
-            // 處理選單與按鈕事件
             bool configChanged = false;
             switch (wmId) {
                 case ID_BTN_BROWSE: BrowseForEngine(); break;
@@ -448,12 +441,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             
             if (configChanged) {
                 UpdateMenuState(GetMenu(hwnd));
-                SaveConfig(); // 設定變更立即存入 INI
+                SaveConfig(); 
             }
             break;
         }
         case WM_DESTROY:
-            SaveConfig(); // 關閉前最後儲存
+            SaveConfig(); 
             PostQuitMessage(0);
             break;
         default:
