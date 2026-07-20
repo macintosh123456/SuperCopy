@@ -339,11 +339,15 @@ std::wstring EscapeTrailingSlash(std::wstring p) {
     return p;
 }
 
+// =========================================================
+// 組合命令列參數 (請覆蓋 SuperCopyClient.cpp 中的這個函數)
+// =========================================================
 void ExecuteEngine() {
     wchar_t exeBuf[MAX_PATH];
     GetWindowTextW(hExePathEdit, exeBuf, MAX_PATH);
     std::wstring exePath(exeBuf);
 
+    // 處理左側來源路徑
     int selIdx = (int)SendMessageW(hLeftList, LB_GETCURSEL, 0, 0);
     std::wstring srcPath = currentLeftPath;
     if (selIdx != LB_ERR) {
@@ -353,9 +357,23 @@ void ExecuteEngine() {
         if (item.substr(0, 6) == L"[DIR] ") item = item.substr(6);
         if (item != Msg(L"[ .. ] (返回上一層)", L"[ .. ] (Go Up)")) srcPath = (fs::path(currentLeftPath) / item).wstring();
     }
-    std::wstring dstPath = currentRightPath;
 
-    // 將路徑經過 EscapeTrailingSlash 保護後，再組合字串
+    // 處理右側目的路徑
+    std::wstring dstPath = currentRightPath;
+    int rightSelIdx = (int)SendMessageW(hRightList, LB_GETCURSEL, 0, 0);
+    if (rightSelIdx != LB_ERR) {
+        wchar_t itemBuf[MAX_PATH];
+        SendMessageW(hRightList, LB_GETTEXT, rightSelIdx, (LPARAM)itemBuf);
+        std::wstring item(itemBuf);
+        // 【修復】如果你在右側選中了資料夾，就把這個資料夾當作目的地！
+        if (item.substr(0, 6) == L"[DIR] ") {
+            item = item.substr(6);
+            if (item != Msg(L"[ .. ] (返回上一層)", L"[ .. ] (Go Up)")) {
+                dstPath = (fs::path(currentRightPath) / item).wstring();
+            }
+        }
+    }
+
     std::wstring cmdArgs = L"\"" + exePath + L"\" \"" + EscapeTrailingSlash(srcPath) + L"\" \"" + EscapeTrailingSlash(dstPath) + L"\"";
     cmdArgs += L" --ram " + std::to_wstring(g_config.ram_gb);
     cmdArgs += L" --chunk " + std::to_wstring(g_config.chunk_mb);
@@ -367,7 +385,6 @@ void ExecuteEngine() {
     if (g_config.zc) cmdArgs += L" --zc";
     if (g_config.eht) cmdArgs += L" --eht";
 
-    // 外層再加上一對引號，完美適配 cmd.exe 的跳脫機制
     std::wstring fullCmd = L"/k \" " + cmdArgs + L" \""; 
     
     SHELLEXECUTEINFOW sei = { sizeof(sei) };
@@ -381,6 +398,7 @@ void ExecuteEngine() {
     if (!ShellExecuteExW(&sei)) {
         MessageBoxW(hMainWnd, Msg(L"無法啟動引擎，請確認路徑。", L"Failed to start engine.").c_str(), Msg(L"錯誤", L"Error").c_str(), MB_ICONERROR);
     }
+}
 }
 
 // ==========================================
