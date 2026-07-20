@@ -339,6 +339,9 @@ public:
     // =========================================================
     // 前導作業與主執行管線
     // =========================================================
+// =========================================================
+    // 前導作業與主執行管線 (請覆蓋 SuperCopy.cpp 中的這個函數)
+    // =========================================================
     void Execute() {
         std::wcout << Msg(L"[系統] 執行前導作業：目錄結構解析與建立...\n", 
                           L"[Sys] Pre-flight Phase: Analyzing and mapping directories...\n");
@@ -346,16 +349,14 @@ public:
         fs::path src_path(src_root);
         fs::path dst_path(dst_root);
 
-        // Zero Copy 降級
         if (cfg.zc) {
             std::wcout << L"[Sys] Zero Copy Triggered. Using native OS transfer.\n";
-            // Native fallback implementation...
             return;
         }
 
-        // 遞迴掃描與建立結構
         try {
             if (fs::is_directory(src_path)) {
+                // 原本的邏輯：處理整個資料夾
                 for (const auto& entry : fs::recursive_directory_iterator(src_path)) {
                     if (g_stop_requested) break;
                     fs::path rel_path = fs::relative(entry.path(), src_path);
@@ -368,13 +369,25 @@ public:
                         total_bytes_to_copy += fsize;
                         total_files_count++;
 
-                        if (fsize > cfg.chunk_bytes) {
-                            large_file_queue.push({ entry.path().wstring(), target_path.wstring(), fsize });
-                        } else {
-                            small_file_queue.push({ entry.path().wstring(), target_path.wstring(), fsize });
-                        }
+                        if (fsize > cfg.chunk_bytes) large_file_queue.push({ entry.path().wstring(), target_path.wstring(), fsize });
+                        else small_file_queue.push({ entry.path().wstring(), target_path.wstring(), fsize });
                     }
                 }
+            } 
+            else if (fs::is_regular_file(src_path)) {
+                // 【修復】新增邏輯：如果來源是「單一檔案」，直接排入佇列
+                uintmax_t fsize = fs::file_size(src_path);
+                total_bytes_to_copy += fsize;
+                total_files_count++;
+                
+                fs::path target_path = dst_path;
+                // 如果目的地是一個資料夾，就把檔名接上去 (例如 F:\新增資料夾\影片.mp4)
+                if (fs::is_directory(dst_path)) {
+                    target_path /= src_path.filename();
+                }
+
+                if (fsize > cfg.chunk_bytes) large_file_queue.push({ src_path.wstring(), target_path.wstring(), fsize });
+                else small_file_queue.push({ src_path.wstring(), target_path.wstring(), fsize });
             }
         } catch (const fs::filesystem_error& e) {
             std::cerr << "Filesystem Error: " << e.what() << "\n";
@@ -386,19 +399,23 @@ public:
         std::wcout << L"  -> Small Files: " << small_file_queue.size() << L"\n";
         std::wcout << L"  -> Large Files: " << large_file_queue.size() << L"\n\n";
 
+        if (total_files_count == 0) {
+            std::wcout << Msg(L"[警告] 沒有找到任何檔案需要複製。\n", L"[Warn] No files found to copy.\n");
+            return;
+        }
+
         // 啟動管理與小檔線程 (Phase 1 活躍)
         std::thread t_dtr(&SuperCopyEngine::Thread_DiskToRam, this);
         std::thread t_rtd(&SuperCopyEngine::Thread_RamToDisk, this);
         std::thread t_rfds(&SuperCopyEngine::Thread_ReadFromDiskSmall, this);
         std::thread t_wtds(&SuperCopyEngine::Thread_WriteToDiskSmall, this);
 
-        // 預先啟動大檔線程 (會自動進入 Phase 2 CV Wait 休眠)
+        // 預先啟動大檔線程
         std::vector<std::thread> rfd_threads, wtd_threads;
         for (int i = 0; i < cfg.rfd_count; ++i) rfd_threads.emplace_back(&SuperCopyEngine::Thread_ReadFromDisk, this, i);
         for (int i = 0; i < cfg.wtd_count; ++i) wtd_threads.emplace_back(&SuperCopyEngine::Thread_WriteToDisk, this, i);
 
         // 監控進度
-        auto start_time = std::chrono::steady_clock::now();
         while (!g_stop_requested && completed_files.load() < total_files_count) {
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
             double progress = total_bytes_to_copy == 0 ? 100.0 : (static_cast<double>(total_bytes_written.load()) / total_bytes_to_copy) * 100.0;
