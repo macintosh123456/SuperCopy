@@ -35,7 +35,6 @@ struct AppConfig {
     bool lang_us = false; // false = TW, true = US
 } g_config;
 
-// UI 介面控制代碼 (新增 hLblExePath 以利動態切換語言)
 HWND hMainWnd, hExePathEdit, hBtnBrowseExe, hLblExePath;
 HWND hLeftList, hRightList, hLeftPath, hRightPath;
 HWND hLeftDrv, hRightDrv; 
@@ -179,18 +178,19 @@ HMENU BuildMenu() {
     return hMenu;
 }
 
-void UpdateUILanguage() {
-    SetWindowTextW(hMainWnd, Msg(L"SuperCopy V7 控制中心", L"SuperCopy V7 Control Center").c_str());
+// 修正：傳入 hwnd，確保綁定在正確的視窗實體上
+void UpdateUILanguage(HWND hwnd) {
+    SetWindowTextW(hwnd, Msg(L"SuperCopy V7 控制中心", L"SuperCopy V7 Control Center").c_str());
     SetWindowTextW(hLblExePath, Msg(L"SuperCopy.exe 引擎路徑:", L"SuperCopy.exe Engine Path:").c_str());
     SetWindowTextW(hBtnBrowseExe, Msg(L"瀏覽...", L"Browse...").c_str());
     SetWindowTextW(hBtnCopyL2R, Msg(L">>> 啟動 SuperCopy V7 (左側複製到右側) >>>", L">>> Launch SuperCopy V7 (Left to Right) >>>").c_str());
 
-    HMENU hOldMenu = GetMenu(hMainWnd);
+    HMENU hOldMenu = GetMenu(hwnd);
     HMENU hNewMenu = BuildMenu();
-    SetMenu(hMainWnd, hNewMenu);
+    SetMenu(hwnd, hNewMenu);
     UpdateMenuState(hNewMenu);
     if (hOldMenu) DestroyMenu(hOldMenu);
-    DrawMenuBar(hMainWnd);
+    DrawMenuBar(hwnd);
 }
 
 // ==========================================
@@ -371,7 +371,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_CREATE: {
             LoadConfig();
 
-            // 改為動態載入的 UI 元件
+            // 建立 UI 控制項
             hLblExePath = CreateWindowW(L"STATIC", L"", WS_CHILD | WS_VISIBLE, 10, 10, 190, 20, hwnd, NULL, NULL, NULL);
             hExePathEdit = CreateWindowW(L"EDIT", g_config.exe_path.c_str(), WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 205, 8, 480, 24, hwnd, NULL, NULL, NULL);
             hBtnBrowseExe = CreateWindowW(L"BUTTON", L"", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 695, 7, 75, 26, hwnd, (HMENU)ID_BTN_BROWSE, NULL, NULL);
@@ -398,8 +398,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             int d_idx = (int)SendMessageW(hRightDrv, CB_FINDSTRINGEXACT, -1, (LPARAM)rightRoot.c_str());
             SendMessageW(hRightDrv, CB_SETCURSEL, d_idx != CB_ERR ? d_idx : 0, 0);
 
-            // 建立選單並套用語言
-            UpdateUILanguage();
+            // 呼叫更新時，將 hwnd 傳入，確保選單綁定成功
+            UpdateUILanguage(hwnd);
 
             LoadDirectory(hLeftList, hLeftPath, currentLeftPath);
             LoadDirectory(hRightList, hRightPath, currentRightPath);
@@ -424,8 +424,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 case ID_BTN_BROWSE: BrowseForEngine(); break;
                 case ID_BTN_COPY: ExecuteEngine(); break;
 
-                case IDM_LANG_TW: g_config.lang_us = false; UpdateUILanguage(); configChanged = true; break;
-                case IDM_LANG_US: g_config.lang_us = true; UpdateUILanguage(); configChanged = true; break;
+                // 更新語言時，同樣傳入 hwnd
+                case IDM_LANG_TW: g_config.lang_us = false; UpdateUILanguage(hwnd); configChanged = true; break;
+                case IDM_LANG_US: g_config.lang_us = true; UpdateUILanguage(hwnd); configChanged = true; break;
 
                 case IDM_RAM_4:  g_config.ram_gb = 4; configChanged = true; break;
                 case IDM_RAM_8:  g_config.ram_gb = 8; configChanged = true; break;
