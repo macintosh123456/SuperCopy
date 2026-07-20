@@ -267,10 +267,9 @@ void LoadDirectory(HWND hList, HWND hLabel, std::wstring& currentPath) {
         SendMessageW(hList, LB_ADDSTRING, 0, (LPARAM)Msg(L"[ .. ] (返回上一層)", L"[ .. ] (Go Up)").c_str());
     }
 
-    // 強化：忽略沒有權限的系統資料夾，避免發生崩潰或停止讀取
     std::error_code ec;
     for (const auto& entry : fs::directory_iterator(currentPath, fs::directory_options::skip_permission_denied, ec)) {
-        if (ec) continue; // 跳過無法存取的檔案
+        if (ec) continue; 
         std::wstring name = entry.path().filename().wstring();
         if (entry.is_directory(ec)) {
             folders.push_back(L"[DIR] " + name);
@@ -295,17 +294,16 @@ void HandleListDoubleClick(HWND hList, HWND hLabel, std::wstring& currentPath) {
     std::wstring selection(buf);
 
     if (selection == Msg(L"[ .. ] (返回上一層)", L"[ .. ] (Go Up)")) {
-        // [修正1]：徹底解決斜線干擾返回上一層的陷阱
         std::wstring tempPath = currentPath;
         if (tempPath.length() > 3 && tempPath.back() == L'\\') {
-            tempPath.pop_back(); // 先拔除尾端斜線
+            tempPath.pop_back(); 
         }
         
         fs::path p(tempPath);
         currentPath = p.parent_path().wstring();
         
-        if (currentPath.empty()) currentPath = L"C:\\"; // 防呆機制
-        if (currentPath.back() != L'\\') currentPath += L"\\"; // 保證目錄格式
+        if (currentPath.empty()) currentPath = L"C:\\"; 
+        if (currentPath.back() != L'\\') currentPath += L"\\"; 
         
         LoadDirectory(hList, hLabel, currentPath);
     } 
@@ -331,23 +329,21 @@ void HandleDriveChange(HWND hCombo, HWND hList, HWND hLabel, std::wstring& curre
     SaveConfig();
 }
 
-// [修正2]：保護路徑不被結尾斜線破壞 CMD 命令結構
+// ==========================================
+// 引擎執行邏輯
+// ==========================================
 std::wstring EscapeTrailingSlash(std::wstring p) {
     if (!p.empty() && p.back() == L'\\') {
-        p += L"\\"; // 例如將 D:\ 變成 D:\\，這樣才不會吃掉 CMD 裡的雙引號
+        p += L"\\"; 
     }
     return p;
 }
 
-// =========================================================
-// 組合命令列參數 (請覆蓋 SuperCopyClient.cpp 中的這個函數)
-// =========================================================
 void ExecuteEngine() {
     wchar_t exeBuf[MAX_PATH];
     GetWindowTextW(hExePathEdit, exeBuf, MAX_PATH);
     std::wstring exePath(exeBuf);
 
-    // 處理左側來源路徑
     int selIdx = (int)SendMessageW(hLeftList, LB_GETCURSEL, 0, 0);
     std::wstring srcPath = currentLeftPath;
     if (selIdx != LB_ERR) {
@@ -357,15 +353,12 @@ void ExecuteEngine() {
         if (item.substr(0, 6) == L"[DIR] ") item = item.substr(6);
         if (item != Msg(L"[ .. ] (返回上一層)", L"[ .. ] (Go Up)")) srcPath = (fs::path(currentLeftPath) / item).wstring();
     }
-
-    // 處理右側目的路徑
     std::wstring dstPath = currentRightPath;
     int rightSelIdx = (int)SendMessageW(hRightList, LB_GETCURSEL, 0, 0);
     if (rightSelIdx != LB_ERR) {
         wchar_t itemBuf[MAX_PATH];
         SendMessageW(hRightList, LB_GETTEXT, rightSelIdx, (LPARAM)itemBuf);
         std::wstring item(itemBuf);
-        // 【修復】如果你在右側選中了資料夾，就把這個資料夾當作目的地！
         if (item.substr(0, 6) == L"[DIR] ") {
             item = item.substr(6);
             if (item != Msg(L"[ .. ] (返回上一層)", L"[ .. ] (Go Up)")) {
@@ -398,7 +391,6 @@ void ExecuteEngine() {
     if (!ShellExecuteExW(&sei)) {
         MessageBoxW(hMainWnd, Msg(L"無法啟動引擎，請確認路徑。", L"Failed to start engine.").c_str(), Msg(L"錯誤", L"Error").c_str(), MB_ICONERROR);
     }
-}
 }
 
 // ==========================================
